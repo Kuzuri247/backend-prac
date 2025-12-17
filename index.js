@@ -43,13 +43,17 @@ const auth = async (req, res, next) => {
   }
 };
 
-
 app.post("/auth/signup", async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
-
+    
     if (!name || !email || !password || !role)
       return res.status(400).json({ success: false, error: "Invalid request schema" });
+    
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email))
+      return res.status(400).json({ success: false, error: "Invalid request schema" });
+    
     if (password.length < 6)
       return res.status(400).json({ success: false, error: "Invalid request schema" });
     if (!["student", "teacher"].includes(role)) 
@@ -71,14 +75,19 @@ app.post("/auth/signup", async (req, res) => {
     delete userRw.password;
     res.status(201).json({ success: true, data: userRw });
   } catch (err) {
-    res.status(400).json({ success: false, error: "Invalid email format" });
+    res.status(400).json({ success: false, error: "Invalid request schema" });
   }
 });
 
 app.post("/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
+    
     if (!email || !password)
+      return res.status(400).json({ success: false, error: "Invalid request schema" });
+    
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email))
       return res.status(400).json({ success: false, error: "Invalid request schema" });
 
     const user = await User.findOne({ email });
@@ -92,7 +101,7 @@ app.post("/auth/login", async (req, res) => {
     const token = generateToken(user._id, user.role);
     res.json({ success: true, data: { token } });
   } catch (err) {
-    res.status(400).json({ success: false, error: "Invalid email format" });
+    res.status(400).json({ success: false, error: "Invalid request schema" });
   }
 });
 
@@ -135,7 +144,6 @@ app.post("/class/:id/add-student", auth, async (req, res) => {
     const student = await User.findById(req.body.studentId);
     if (!student) return res.status(404).json({ success: false, error: "Student not found" });
 
-    // FIX: Compare IDs safely using toString() or .some()
     if (!classObj.studentIds.some(id => id.toString() === req.body.studentId)) {
       classObj.studentIds.push(req.body.studentId);
       await classObj.save();
@@ -154,7 +162,6 @@ app.get("/class/:id", auth, async (req, res) => {
     if (!classObj) return res.status(404).json({ success: false, error: "Class not found" });
 
     const isTeacher = classObj.teacherId.toString() === req.user.id;
-    // FIX: Ensure safe comparison for populated array
     const isStudent = classObj.studentIds.some((s) => s._id.toString() === req.user.id);
 
     if (req.user.role === "teacher" && !isTeacher)
@@ -193,6 +200,7 @@ app.post("/attendance/start", auth, async (req, res) => {
     if (classObj.teacherId.toString() !== req.user.id)
       return res.status(403).json({ success: false, error: "Forbidden, not class teacher" });
 
+    // ✅ FIX: Clear any existing session
     activeSession = {
       classId: classObj._id,
       startedAt: new Date(),
@@ -243,8 +251,7 @@ wss.on("connection", async (ws, req) => {
     ws.user = decoded;
   } catch (err) {
     ws.send(JSON.stringify({ event: "ERROR", data: { message: "Unauthorized or invalid token" } }));
-    // FIX: Terminate logic (the test expects it to close)
-    return ws.close();
+    return ws.terminate();
   }
 
   ws.on("message", async (message) => {
@@ -256,6 +263,7 @@ wss.on("connection", async (ws, req) => {
         if (ws.user.role !== "teacher") {
           return ws.send(JSON.stringify({ event: "ERROR", data: { message: "Forbidden, teacher event only" } }));
         }
+        // ✅ FIX: Remove the Map logic, use simple activeSession
         if (!activeSession) {
           return ws.send(JSON.stringify({ event: "ERROR", data: { message: "No active attendance session" } }));
         }
@@ -296,7 +304,6 @@ wss.on("connection", async (ws, req) => {
         
         const summaryData = { present, absent, total: present + absent };
 
-        // Broadcast to ALL
         wss.clients.forEach(client => {
           if (client.readyState === 1) {
             client.send(JSON.stringify({ event: 'TODAY_SUMMARY', data: summaryData }));

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach,afterEach } from 'vitest';
 import WebSocket from 'ws';
 
 const BASE_URL = process.env.SERVER_URL || 'http://localhost:3000';
@@ -61,7 +61,7 @@ async function createTeacherAndLogin() {
     password: 'password123',
     role: 'teacher'
   });
-  const { data } = await request('POST', '/auth/login', { email, password: 'password12345' });
+  const { data } = await request('POST', '/auth/login', { email, password: 'password123' });
   return { token: data.data.token, email };
 }
 
