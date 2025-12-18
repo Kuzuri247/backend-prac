@@ -23,7 +23,7 @@ mongoose
   .then(() => console.log("Connected to MongoDB"))
   .catch((err) => console.log(err));
 
-let activeSession = null;
+const activeSessions = new Map();
 
 const generateToken = (id, role) => {
   return jwt.sign({ id, role }, process.env.JWT_SECRET || "secret", {
@@ -258,14 +258,16 @@ app.post("/attendance/start", auth, async (req, res) => {
         .status(403)
         .json({ success: false, error: "Forbidden, not class teacher" });
 
-    activeSession = {
+    const sessionData = {
       classId: classObj._id,
       teacherId: req.user.id,
       startedAt: new Date(),
       attendance: {},
     };
 
-    res.json({ success: true, data: activeSession });
+    activeSessions.set(req.user.id, sessionData);
+
+    res.json({ success: true, data: sessionData });
   } catch (err) {
     res.status(404).json({ success: false, error: "Class not found" });
   }
@@ -342,7 +344,8 @@ wss.on("connection", async (ws, req) => {
           return;
         }
 
-        if (!activeSession || activeSession.teacherId.toString() !== ws.user.id) {
+        const activeSession = activeSessions.get(ws.user.id);
+        if (!activeSession) {
           ws.send(
             JSON.stringify({
               event: "ERROR",
@@ -385,6 +388,23 @@ wss.on("connection", async (ws, req) => {
           );
           return;
         }
+
+        let activeSession = null;
+        for (const session of activeSessions.values()) {
+          try {
+            const classObj = await Class.findById(session.classId);
+            if (
+              classObj &&
+              classObj.studentIds.some((id) => id.toString() === ws.user.id)
+            ) {
+              activeSession = session;
+              break;
+            }
+          } catch (err) {
+            continue;
+          }
+        }
+
         if (!activeSession) {
           ws.send(
             JSON.stringify({
@@ -394,6 +414,7 @@ wss.on("connection", async (ws, req) => {
           );
           return;
         }
+
         const status =
           activeSession.attendance[ws.user.id] || "not yet updated";
         ws.send(JSON.stringify({ event: "MY_ATTENDANCE", data: { status } }));
@@ -407,7 +428,9 @@ wss.on("connection", async (ws, req) => {
           );
           return;
         }
-        if (!activeSession || activeSession.teacherId.toString() !== ws.user.id) {
+
+        const activeSession = activeSessions.get(ws.user.id);
+        if (!activeSession) {
           ws.send(
             JSON.stringify({
               event: "ERROR",
@@ -440,14 +463,15 @@ wss.on("connection", async (ws, req) => {
           );
           return;
         }
-        if (!activeSession || activeSession.teacherId.toString() !== ws.user.id) {
+
+        const activeSession = activeSessions.get(ws.user.id);
+        if (!activeSession) {
           ws.send(
             JSON.stringify({
               event: "ERROR",
               data: { message: "No active attendance session" },
             })
           );
-
           return;
         }
 
@@ -484,7 +508,8 @@ wss.on("connection", async (ws, req) => {
           }
         });
 
-        activeSession = null;
+        // Clear this teacher's session
+        activeSessions.delete(ws.user.id);
       } else {
         ws.send(
           JSON.stringify({ event: "ERROR", data: { message: "Unknown event" } })
